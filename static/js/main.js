@@ -468,10 +468,118 @@ function updateRealtimeStats() {
             document.getElementById('maxAreaRatio').textContent = (data.max_area_ratio * 100).toFixed(2) + '%';
             document.getElementById('trend').textContent = getTrendDisplayName(data.trend);
             document.getElementById('dataPoints').textContent = data.data_points;
+            
+            // 타이머 상태 확인
+            updateTimerStatus();
+            
+            // 최신 감지 결과 확인
+            checkDetectionResult();
         })
         .catch(error => {
             console.error('실시간 통계 업데이트 오류:', error);
         });
+}
+
+// 타이머 상태 업데이트
+function updateTimerStatus() {
+    fetch('/timer_status')
+        .then(response => response.json())
+        .then(data => {
+            const timerStatus = document.getElementById('timerStatus');
+            if (!timerStatus) return;
+            
+            if (data.timer_running) {
+                timerStatus.innerHTML = `
+                    <div class="timer-active">
+                        <i class="fas fa-clock"></i> 분석 진행 중
+                        <div class="timer-details">
+                            세션: ${data.session_id}<br>
+                            경과 시간: ${data.elapsed_time.toFixed(1)}초<br>
+                            남은 시간: ${data.remaining_time.toFixed(1)}초<br>
+                            수집된 프레임: ${data.frames_collected}개
+                        </div>
+                    </div>
+                `;
+            } else {
+                timerStatus.innerHTML = `
+                    <div class="timer-inactive">
+                        <i class="fas fa-pause"></i> 대기 중
+                    </div>
+                `;
+            }
+        })
+        .catch(error => {
+            console.error('타이머 상태 업데이트 오류:', error);
+        });
+}
+
+// 최신 감지 결과 확인
+function checkDetectionResult() {
+    fetch('/detection_result')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.result) {
+                displayDetectionResult(data.result);
+            }
+        })
+        .catch(error => {
+            console.error('감지 결과 확인 오류:', error);
+        });
+}
+
+// 감지 결과 표시
+function displayDetectionResult(result) {
+    const resultContainer = document.getElementById('detectionResult');
+    if (!resultContainer) return;
+    
+    const endTime = new Date(result.end_time);
+    const stats = result.statistics;
+    
+    resultContainer.innerHTML = `
+        <div class="detection-result">
+            <h4><i class="fas fa-chart-bar"></i> 최신 분석 결과</h4>
+            <div class="result-summary">
+                <div class="result-grade grade-${result.final_grade}">
+                    ${getGradeDisplayName(result.final_grade)} 등급
+                </div>
+                <div class="result-stats">
+                    <div class="stat-item">
+                        <span class="label">평균 면적 비율:</span>
+                        <span class="value">${(stats.avg_area_ratio * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="label">최대 면적 비율:</span>
+                        <span class="value">${(stats.max_area_ratio * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="label">총 탐지 수:</span>
+                        <span class="value">${stats.total_detections}개</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="label">분석 시간:</span>
+                        <span class="value">${endTime.toLocaleString()}</span>
+                    </div>
+                </div>
+                <div class="smoke-color-stats">
+                    <h5>연기 색상 분포</h5>
+                    <div class="color-distribution">
+                        <div class="color-item">
+                            <span class="color-label">흑연:</span>
+                            <span class="color-count">${stats.smoke_color_distribution.black || 0}개</span>
+                        </div>
+                        <div class="color-item">
+                            <span class="color-label">백연:</span>
+                            <span class="color-count">${stats.smoke_color_distribution.white || 0}개</span>
+                        </div>
+                        <div class="color-item">
+                            <span class="color-label">미분류:</span>
+                            <span class="color-count">${stats.smoke_color_distribution.unknown || 0}개</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 // 알림 표시

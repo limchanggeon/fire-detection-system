@@ -481,6 +481,111 @@ section h2 {
     margin-left: 5px;
 }
 
+/* 타이머 상태 스타일 */
+.timer-status {
+    margin: 20px 0;
+    padding: 15px;
+    border-radius: 10px;
+    background: #f7fafc;
+    border: 1px solid #e2e8f0;
+}
+
+.timer-active {
+    color: #e53e3e;
+    font-weight: bold;
+}
+
+.timer-inactive {
+    color: #718096;
+}
+
+.timer-details {
+    font-size: 0.9em;
+    margin-top: 8px;
+    line-height: 1.4;
+}
+
+/* 감지 결과 스타일 */
+.detection-result-container {
+    margin-top: 20px;
+}
+
+.detection-result {
+    background: #fff;
+    border-radius: 10px;
+    padding: 20px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.result-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.result-grade {
+    font-size: 1.5rem;
+    font-weight: bold;
+    text-align: center;
+    padding: 10px;
+    border-radius: 8px;
+    color: white;
+}
+
+.result-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px;
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #f7fafc;
+    border-radius: 6px;
+}
+
+.stat-item .label {
+    color: #4a5568;
+}
+
+.stat-item .value {
+    font-weight: bold;
+    color: #2d3748;
+}
+
+.smoke-color-stats h5 {
+    margin-bottom: 10px;
+    color: #4a5568;
+}
+
+.color-distribution {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.color-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: #edf2f7;
+    border-radius: 6px;
+}
+
+.color-label {
+    color: #4a5568;
+    font-size: 0.9rem;
+}
+
+.color-count {
+    font-weight: bold;
+    color: #2d3748;
+}
+
 @media (max-width: 480px) {
     .stats-grid {
         grid-template-columns: 1fr;

@@ -57,6 +57,13 @@ realtime_stats = {
     'unknown_smoke_count': 0
 }
 
+# 10초 타이머 기반 등급 분류 시스템
+smoke_detection_timer = None
+timer_running = False
+frame_area_buffer = []  # 10초간의 프레임 데이터 저장
+detection_session_id = None
+session_start_time = None
+
 def allowed_file(filename):
     """허용된 파일 확장자인지 확인"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -250,6 +257,195 @@ def get_area_accumulation_stats():
         'time_span': len(areas)  # 초 단위
     }
 
+def start_smoke_detection_timer():
+    """연기 감지 시작 시 10초 타이머 시작"""
+    global smoke_detection_timer, timer_running, frame_area_buffer, detection_session_id, session_start_time
+    
+    if timer_running:
+        return  # 이미 타이머가 실행 중이면 중복 시작 방지
+    
+    # 새 세션 시작
+    detection_session_id = f"session_{int(time.time())}"
+    session_start_time = datetime.now()
+    frame_area_buffer = []
+    timer_running = True
+    
+    print(f"[{detection_session_id}] 연기 감지 타이머 시작 - 10초 후 등급 분류 실행")
+    
+    # 10초 후 등급 분류 실행
+    smoke_detection_timer = threading.Timer(10.0, calculate_final_grade)
+    smoke_detection_timer.start()
+
+def stop_smoke_detection_timer():
+    """연기 감지 타이머 정지"""
+    global smoke_detection_timer, timer_running
+    
+    if smoke_detection_timer:
+        smoke_detection_timer.cancel()
+        smoke_detection_timer = None
+    
+    timer_running = False
+    print("연기 감지 타이머가 정지되었습니다.")
+
+def add_frame_data(detections, frame_width, frame_height, smoke_colors):
+    """프레임별 데이터를 버퍼에 추가"""
+    global frame_area_buffer
+    
+    if not timer_running:
+        return
+    
+    # 연기 클래스만 필터링 (클래스 0)
+    smoke_detections = [det for det in detections if int(det[5]) == 0]
+    
+    total_area = 0
+    detection_details = []
+    
+    for detection in smoke_detections:
+        x1, y1, x2, y2, confidence, class_id = detection
+        area = (x2 - x1) * (y2 - y1)
+        total_area += area
+        
+        detection_details.append({
+            'bbox': [float(x1), float(y1), float(x2), float(y2)],
+            'confidence': float(confidence),
+            'area': float(area),
+            'smoke_color': smoke_colors.get(len(detection_details), 'unknown')
+        })
+    
+    # 전체 프레임 대비 비율 계산
+    frame_area = frame_width * frame_height
+    area_ratio = total_area / frame_area if frame_area > 0 else 0
+    
+    frame_data = {
+        'timestamp': time.time(),
+        'datetime': datetime.now().isoformat(),
+        'area_ratio': area_ratio,
+        'total_area': total_area,
+        'frame_area': frame_area,
+        'detection_count': len(smoke_detections),
+        'detections': detection_details
+    }
+    
+    frame_area_buffer.append(frame_data)
+
+def calculate_final_grade():
+    """10초 후 최종 등급 계산 및 결과 저장"""
+    global timer_running, frame_area_buffer, detection_session_id, session_start_time
+    
+    timer_running = False
+    
+    if not frame_area_buffer:
+        print("분석할 데이터가 없습니다.")
+        return
+    
+    # 평균 면적 비율 계산
+    area_ratios = [frame['area_ratio'] for frame in frame_area_buffer]
+    avg_area_ratio = np.mean(area_ratios)
+    max_area_ratio = np.max(area_ratios)
+    
+    # 등급 분류
+    if avg_area_ratio < 0.30:  # 30% 미만
+        grade = 'small'
+        grade_value = 0
+    elif avg_area_ratio < 0.70:  # 30% 이상 70% 미만
+        grade = 'medium'
+        grade_value = 1
+    else:  # 70% 이상
+        grade = 'large'
+        grade_value = 2
+    
+    # 연기 색상 통계 계산
+    smoke_color_stats = {'black': 0, 'white': 0, 'unknown': 0}
+    total_detections = 0
+    
+    for frame in frame_area_buffer:
+        total_detections += frame['detection_count']
+        for detection in frame['detections']:
+            color = detection['smoke_color']
+            if color in smoke_color_stats:
+                smoke_color_stats[color] += 1
+    
+    # 결과 데이터 구성
+    result = {
+        'session_id': detection_session_id,
+        'start_time': session_start_time.isoformat(),
+        'end_time': datetime.now().isoformat(),
+        'duration_seconds': 10,
+        'final_grade': grade,
+        'grade_value': grade_value,
+        'statistics': {
+            'avg_area_ratio': float(avg_area_ratio),
+            'max_area_ratio': float(max_area_ratio),
+            'total_frames': len(frame_area_buffer),
+            'total_detections': total_detections,
+            'smoke_color_distribution': smoke_color_stats
+        },
+        'frame_data': frame_area_buffer
+    }
+    
+    # 로그 저장
+    save_detection_log(result)
+    
+    # 웹 UI에 결과 전달 (실시간 통계 업데이트)
+    realtime_stats['current_grade'] = grade
+    realtime_stats['last_classification'] = result
+    
+    print(f"[{detection_session_id}] 최종 등급: {grade.upper()} (평균 면적 비율: {avg_area_ratio*100:.1f}%)")
+    
+    return result
+
+def save_detection_log(result):
+    """감지 결과를 로그 파일로 저장"""
+    try:
+        log_filename = f"detection_log_{result['session_id']}.json"
+        log_path = os.path.join('logs', log_filename)
+        
+        with open(log_path, 'w', encoding='utf-8') as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        
+        print(f"로그 저장 완료: {log_path}")
+        
+        # 요약 로그도 저장 (전체 세션 기록)
+        save_summary_log(result)
+        
+    except Exception as e:
+        print(f"로그 저장 오류: {e}")
+
+def save_summary_log(result):
+    """요약 로그 저장 (모든 세션 기록)"""
+    try:
+        summary_path = os.path.join('logs', 'detection_summary.json')
+        
+        # 기존 요약 로그 읽기
+        summary_data = []
+        if os.path.exists(summary_path):
+            with open(summary_path, 'r', encoding='utf-8') as f:
+                summary_data = json.load(f)
+        
+        # 새 세션 요약 추가
+        session_summary = {
+            'session_id': result['session_id'],
+            'start_time': result['start_time'],
+            'end_time': result['end_time'],
+            'final_grade': result['final_grade'],
+            'avg_area_ratio': result['statistics']['avg_area_ratio'],
+            'total_detections': result['statistics']['total_detections'],
+            'smoke_color_distribution': result['statistics']['smoke_color_distribution']
+        }
+        
+        summary_data.append(session_summary)
+        
+        # 최근 100개 세션만 유지
+        if len(summary_data) > 100:
+            summary_data = summary_data[-100:]
+        
+        # 요약 로그 저장
+        with open(summary_path, 'w', encoding='utf-8') as f:
+            json.dump(summary_data, f, indent=2, ensure_ascii=False)
+        
+    except Exception as e:
+        print(f"요약 로그 저장 오류: {e}")
+
 def process_video(video_path):
     """비디오 처리 및 화재 탐지"""
     if model is None:
@@ -357,6 +553,10 @@ def start_camera():
 def stop_camera():
     """웹캠 정지"""
     global camera, camera_running, current_frame, current_detections
+    
+    # 연기 감지 타이머도 함께 정지
+    stop_smoke_detection_timer()
+    
     camera_running = False
     if camera is not None:
         camera.release()
@@ -430,22 +630,36 @@ def process_realtime_frame(frame):
         fire_count = sum(1 for det in detections if int(det[5]) == 0)
         smoke_count = sum(1 for det in detections if int(det[5]) == 1)
         
-        # 연기 색상별 카운트 계산 (클래스 0이 연기)
+        # 연기 색상별 카운트 계산 및 연기 색상 데이터 수집 (클래스 0이 연기)
         black_smoke_count = 0
         white_smoke_count = 0
         unknown_smoke_count = 0
+        smoke_colors = {}  # 각 탐지에 대한 색상 정보
         
-        for detection in detections:
+        smoke_detection_found = False
+        for i, detection in enumerate(detections):
             class_id = int(detection[5])
             if class_id == 0:  # 연기 클래스
+                smoke_detection_found = True
                 bbox = [int(detection[0]), int(detection[1]), int(detection[2]), int(detection[3])]
                 smoke_color, _ = analyze_smoke_color(frame, bbox)
+                smoke_colors[i] = smoke_color
+                
                 if smoke_color == 'black':
                     black_smoke_count += 1
                 elif smoke_color == 'white':
                     white_smoke_count += 1
                 else:
                     unknown_smoke_count += 1
+        
+        # 10초 타이머 시스템 관리
+        if smoke_detection_found and not timer_running:
+            # 연기 감지 시작 → 10초 타이머 시작
+            start_smoke_detection_timer()
+        
+        # 타이머가 실행 중이면 프레임 데이터 추가
+        if timer_running:
+            add_frame_data(detections, width, height, smoke_colors)
         
         # 통계 업데이트
         realtime_stats['frame_count'] += 1
@@ -609,6 +823,94 @@ def capture_frame():
         })
     except Exception as e:
         return jsonify({'error': f'프레임 캡처 실패: {e}'}), 500
+
+@app.route('/detection_result')
+def get_detection_result():
+    """최근 감지 결과 조회"""
+    global realtime_stats
+    
+    if 'last_classification' in realtime_stats:
+        return jsonify({
+            'success': True,
+            'result': realtime_stats['last_classification']
+        })
+    else:
+        return jsonify({
+            'success': False,
+            'message': '아직 완료된 감지 결과가 없습니다.'
+        })
+
+@app.route('/detection_logs')
+def get_detection_logs():
+    """감지 로그 목록 조회"""
+    try:
+        summary_path = os.path.join('logs', 'detection_summary.json')
+        
+        if not os.path.exists(summary_path):
+            return jsonify({
+                'success': True,
+                'logs': []
+            })
+        
+        with open(summary_path, 'r', encoding='utf-8') as f:
+            logs = json.load(f)
+        
+        # 최신 순으로 정렬
+        logs.sort(key=lambda x: x['start_time'], reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'logs': logs
+        })
+    
+    except Exception as e:
+        return jsonify({'error': f'로그 조회 실패: {e}'}), 500
+
+@app.route('/detection_log/<session_id>')
+def get_detection_log_detail(session_id):
+    """특정 세션의 상세 로그 조회"""
+    try:
+        log_filename = f"detection_log_{session_id}.json"
+        log_path = os.path.join('logs', log_filename)
+        
+        if not os.path.exists(log_path):
+            return jsonify({'error': '해당 세션의 로그를 찾을 수 없습니다.'}), 404
+        
+        with open(log_path, 'r', encoding='utf-8') as f:
+            log_data = json.load(f)
+        
+        return jsonify({
+            'success': True,
+            'log': log_data
+        })
+    
+    except Exception as e:
+        return jsonify({'error': f'로그 상세 조회 실패: {e}'}), 500
+
+@app.route('/timer_status')
+def get_timer_status():
+    """현재 타이머 상태 조회"""
+    global timer_running, detection_session_id, session_start_time, frame_area_buffer
+    
+    if timer_running and session_start_time:
+        elapsed_time = (datetime.now() - session_start_time).total_seconds()
+        remaining_time = max(0, 10 - elapsed_time)
+        
+        return jsonify({
+            'timer_running': True,
+            'session_id': detection_session_id,
+            'elapsed_time': elapsed_time,
+            'remaining_time': remaining_time,
+            'frames_collected': len(frame_area_buffer)
+        })
+    else:
+        return jsonify({
+            'timer_running': False,
+            'session_id': None,
+            'elapsed_time': 0,
+            'remaining_time': 0,
+            'frames_collected': 0
+        })
 
 if __name__ == '__main__':
     # 모델 로드
