@@ -23,10 +23,9 @@ ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov', 'wmv', 'flv', 'webm'}
 model = None
 area_accumulator = deque(maxlen=10)  # 10초간의 면적 데이터 저장 (1초당 1프레임 가정)
 smoke_grades = {
-    'light': 0,
-    'moderate': 1, 
-    'heavy': 2,
-    'critical': 3
+    'small': 0,     # 소형
+    'medium': 1,    # 중형  
+    'large': 2      # 대형
 }
 
 # 클래스 라벨 매핑 (모델에 따라 수정 필요)
@@ -49,7 +48,7 @@ current_detections = []
 realtime_stats = {
     'frame_count': 0,
     'detection_count': 0,
-    'current_grade': 'light',
+    'current_grade': 'small',
     'last_update': time.time()
 }
 
@@ -115,17 +114,17 @@ def calculate_area_accumulation(detections, frame_width, frame_height):
 
 def classify_smoke_grade(area_ratio, confidence_scores):
     """연기 등급 분류 로직"""
-    avg_confidence = np.mean(confidence_scores) if confidence_scores else 0
+    # 새로운 연기 등급 분류 기준:
+    # - 소형: 평균 면적 비율 < 30%
+    # - 중형: 30% ≤ 평균 면적 비율 < 70%  
+    # - 대형: 평균 면적 비율 ≥ 70%
     
-    # 면적 비율과 신뢰도를 고려한 등급 분류
-    if area_ratio < 0.01 and avg_confidence < 0.5:
-        return 'light', smoke_grades['light']
-    elif area_ratio < 0.05 and avg_confidence < 0.7:
-        return 'moderate', smoke_grades['moderate']
-    elif area_ratio < 0.15 and avg_confidence < 0.85:
-        return 'heavy', smoke_grades['heavy']
-    else:
-        return 'critical', smoke_grades['critical']
+    if area_ratio < 0.30:  # 30% 미만
+        return 'small', smoke_grades['small']
+    elif area_ratio < 0.70:  # 30% 이상 70% 미만
+        return 'medium', smoke_grades['medium']
+    else:  # 70% 이상
+        return 'large', smoke_grades['large']
 
 def get_area_accumulation_stats():
     """10초간 면적 누적 통계 계산"""

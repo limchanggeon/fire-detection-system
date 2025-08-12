@@ -495,22 +495,21 @@ function formatTime(seconds) {
 }
 
 function getGradeName(gradeValue) {
-    const grades = ['light', 'moderate', 'heavy', 'critical'];
-    return grades[gradeValue] || 'light';
+    const grades = ['small', 'medium', 'large'];
+    return grades[gradeValue] || 'small';
 }
 
 function getGradeDisplayName(gradeValue) {
     if (typeof gradeValue === 'string') {
         const displayNames = {
-            'light': '경미',
-            'moderate': '보통', 
-            'heavy': '심각',
-            'critical': '위험'
+            'small': '소형',
+            'medium': '중형', 
+            'large': '대형'
         };
-        return displayNames[gradeValue] || '경미';
+        return displayNames[gradeValue] || '소형';
     } else {
-        const displayNames = ['경미', '보통', '심각', '위험'];
-        return displayNames[gradeValue] || '경미';
+        const displayNames = ['소형', '중형', '대형'];
+        return displayNames[gradeValue] || '소형';
     }
 }
 

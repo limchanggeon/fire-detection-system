@@ -284,10 +284,9 @@ section h2 {
     text-transform: uppercase;
 }
 
-#currentGrade.grade-light { background: #48bb78; }
-#currentGrade.grade-moderate { background: #ed8936; }
-#currentGrade.grade-heavy { background: #f56565; }
-#currentGrade.grade-critical { background: #e53e3e; }
+#currentGrade.grade-small { background: #48bb78; }
+#currentGrade.grade-medium { background: #ed8936; }
+#currentGrade.grade-large { background: #f56565; }
 
 /* 결과 섹션 */
 .result-summary {
@@ -327,10 +326,9 @@ section h2 {
     border-radius: 50%;
 }
 
-.grade-light .grade-color { background: #48bb78; }
-.grade-moderate .grade-color { background: #ed8936; }
-.grade-heavy .grade-color { background: #f56565; }
-.grade-critical .grade-color { background: #e53e3e; }
+.grade-small .grade-color { background: #48bb78; }
+.grade-medium .grade-color { background: #ed8936; }
+.grade-large .grade-color { background: #f56565; }
 
 /* 차트 컨테이너 */
 .chart-container {
@@ -386,10 +384,9 @@ section h2 {
     color: white;
 }
 
-.grade-light { background: #48bb78; }
-.grade-moderate { background: #ed8936; }
-.grade-heavy { background: #f56565; }
-.grade-critical { background: #e53e3e; }
+.grade-small { background: #48bb78; }
+.grade-medium { background: #ed8936; }
+.grade-large { background: #f56565; }
 
 /* 알림 */
 .notification {
