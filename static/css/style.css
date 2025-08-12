@@ -458,6 +458,29 @@ section h2 {
     }
 }
 
+/* 연기 색상별 스타일 */
+#blackSmokeCount {
+    color: #333;
+    font-weight: bold;
+}
+
+#whiteSmokeCount {
+    color: #888;
+    font-weight: bold;
+}
+
+#unknownSmokeCount {
+    color: #666;
+    font-style: italic;
+}
+
+/* 연기 색상 정보를 위한 추가 스타일 */
+.smoke-color-info {
+    font-size: 0.85em;
+    color: #666;
+    margin-left: 5px;
+}
+
 @media (max-width: 480px) {
     .stats-grid {
         grid-template-columns: 1fr;

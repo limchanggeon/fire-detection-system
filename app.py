@@ -49,7 +49,12 @@ realtime_stats = {
     'frame_count': 0,
     'detection_count': 0,
     'current_grade': 'small',
-    'last_update': time.time()
+    'last_update': time.time(),
+    'fire_count': 0,
+    'smoke_count': 0,
+    'black_smoke_count': 0,
+    'white_smoke_count': 0,
+    'unknown_smoke_count': 0
 }
 
 def allowed_file(filename):
@@ -125,6 +130,87 @@ def classify_smoke_grade(area_ratio, confidence_scores):
         return 'medium', smoke_grades['medium']
     else:  # 70% 이상
         return 'large', smoke_grades['large']
+
+def analyze_smoke_color(frame, bbox):
+    """연기 색상 분석 - 흑연/백연 구분"""
+    try:
+        x1, y1, x2, y2 = map(int, bbox)
+        
+        # 바운딩 박스 영역 추출
+        smoke_region = frame[y1:y2, x1:x2]
+        
+        if smoke_region.size == 0:
+            return 'unknown', 0.0
+        
+        # BGR을 HSV로 변환
+        hsv = cv2.cvtColor(smoke_region, cv2.COLOR_BGR2HSV)
+        
+        # 명도(Value) 채널 분석
+        v_channel = hsv[:, :, 2]
+        avg_brightness = np.mean(v_channel)
+        
+        # 채도(Saturation) 채널 분석 - 연기는 일반적으로 채도가 낮음
+        s_channel = hsv[:, :, 1]
+        avg_saturation = np.mean(s_channel)
+        
+        # 그레이스케일로 변환하여 명도 분포 분석
+        gray = cv2.cvtColor(smoke_region, cv2.COLOR_BGR2GRAY)
+        
+        # 히스토그램 분석
+        hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
+        hist = hist.flatten()
+        
+        # 어두운 영역(0-85), 중간 영역(86-170), 밝은 영역(171-255)의 비율 계산
+        dark_ratio = np.sum(hist[0:86]) / np.sum(hist)
+        mid_ratio = np.sum(hist[86:171]) / np.sum(hist)
+        bright_ratio = np.sum(hist[171:256]) / np.sum(hist)
+        
+        # 연기 색상 분류 로직
+        confidence = 0.0
+        
+        # 흑연 판별 조건
+        if (avg_brightness < 100 and  # 낮은 명도
+            dark_ratio > 0.4 and     # 어두운 픽셀이 40% 이상
+            avg_saturation < 50):    # 낮은 채도
+            smoke_type = 'black'
+            confidence = min(0.9, (dark_ratio * 2 + (100 - avg_brightness) / 100) / 2)
+            
+        # 백연 판별 조건  
+        elif (avg_brightness > 150 and  # 높은 명도
+              bright_ratio > 0.3 and   # 밝은 픽셀이 30% 이상
+              avg_saturation < 80):    # 낮은 채도
+            smoke_type = 'white'
+            confidence = min(0.9, (bright_ratio * 2 + avg_brightness / 255) / 2)
+            
+        # 회색 연기 (중간값)
+        elif (50 <= avg_brightness <= 180 and
+              mid_ratio > 0.3 and
+              avg_saturation < 60):
+            # 명도에 따라 흑연 또는 백연에 가깝게 분류
+            if avg_brightness < 115:
+                smoke_type = 'black'
+                confidence = 0.6
+            else:
+                smoke_type = 'white' 
+                confidence = 0.6
+        else:
+            smoke_type = 'unknown'
+            confidence = 0.3
+            
+        return smoke_type, confidence
+        
+    except Exception as e:
+        print(f"연기 색상 분석 오류: {e}")
+        return 'unknown', 0.0
+
+def get_smoke_color_display_name(smoke_type):
+    """연기 색상 표시명 반환"""
+    display_names = {
+        'black': 'Black Smoke',
+        'white': 'White Smoke', 
+        'unknown': 'Unknown'
+    }
+    return display_names.get(smoke_type, 'Unknown')
 
 def get_area_accumulation_stats():
     """10초간 면적 누적 통계 계산"""
@@ -309,11 +395,22 @@ def process_realtime_frame(frame):
                     label_name = class_labels.get(class_id, f"Class_{class_id}")
                     color = class_colors.get(class_id, (0, 255, 0))  # 기본 녹색
                     
+                    # 연기 색상 분석 (클래스 0이 연기인 경우)
+                    smoke_color = 'unknown'
+                    color_confidence = 0.0
+                    if class_id == 0:  # 연기 클래스 (현재는 'fire'로 라벨링되었지만 실제로는 연기)
+                        smoke_color, color_confidence = analyze_smoke_color(frame, [x1, y1, x2, y2])
+                    
                     # 바운딩 박스 그리기
                     cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
                     
-                    # 라벨 표시
-                    label = f"{label_name}: {confidence:.2f}"
+                    # 라벨 표시 (연기인 경우 색상 정보 포함)
+                    if class_id == 0 and smoke_color != 'unknown':
+                        smoke_display = get_smoke_color_display_name(smoke_color)
+                        label = f"{label_name}: {confidence:.2f} ({smoke_display} {color_confidence:.2f})"
+                    else:
+                        label = f"{label_name}: {confidence:.2f}"
+                        
                     label_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
                     
                     # 라벨 배경 그리기
@@ -333,6 +430,23 @@ def process_realtime_frame(frame):
         fire_count = sum(1 for det in detections if int(det[5]) == 0)
         smoke_count = sum(1 for det in detections if int(det[5]) == 1)
         
+        # 연기 색상별 카운트 계산 (클래스 0이 연기)
+        black_smoke_count = 0
+        white_smoke_count = 0
+        unknown_smoke_count = 0
+        
+        for detection in detections:
+            class_id = int(detection[5])
+            if class_id == 0:  # 연기 클래스
+                bbox = [int(detection[0]), int(detection[1]), int(detection[2]), int(detection[3])]
+                smoke_color, _ = analyze_smoke_color(frame, bbox)
+                if smoke_color == 'black':
+                    black_smoke_count += 1
+                elif smoke_color == 'white':
+                    white_smoke_count += 1
+                else:
+                    unknown_smoke_count += 1
+        
         # 통계 업데이트
         realtime_stats['frame_count'] += 1
         realtime_stats['detection_count'] = len(detections)
@@ -340,9 +454,12 @@ def process_realtime_frame(frame):
         realtime_stats['last_update'] = time.time()
         realtime_stats['fire_count'] = fire_count
         realtime_stats['smoke_count'] = smoke_count
+        realtime_stats['black_smoke_count'] = black_smoke_count
+        realtime_stats['white_smoke_count'] = white_smoke_count
+        realtime_stats['unknown_smoke_count'] = unknown_smoke_count
         
         # 현재 상태 정보 표시
-        status_text = f"Grade: {grade_name.upper()} | Fire: {fire_count} | Smoke: {smoke_count} | Area: {area_ratio*100:.1f}%"
+        status_text = f"Grade: {grade_name.upper()} | Fire: {fire_count} | Smoke: {smoke_count} (흑연: {black_smoke_count}, 백연: {white_smoke_count}) | Area: {area_ratio*100:.1f}%"
         
         # 상태 텍스트 배경 그리기
         text_size = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]

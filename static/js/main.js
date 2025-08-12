@@ -452,6 +452,17 @@ function updateRealtimeStats() {
             document.getElementById('smokeCount').textContent = data.smoke_count || 0;
             document.getElementById('frameCount').textContent = data.frame_count;
             
+            // 연기 색상별 카운트 업데이트
+            if (data.black_smoke_count !== undefined) {
+                document.getElementById('blackSmokeCount').textContent = data.black_smoke_count || 0;
+            }
+            if (data.white_smoke_count !== undefined) {
+                document.getElementById('whiteSmokeCount').textContent = data.white_smoke_count || 0;
+            }
+            if (data.unknown_smoke_count !== undefined) {
+                document.getElementById('unknownSmokeCount').textContent = data.unknown_smoke_count || 0;
+            }
+            
             // 일반 통계도 함께 업데이트
             document.getElementById('avgAreaRatio').textContent = (data.avg_area_ratio * 100).toFixed(2) + '%';
             document.getElementById('maxAreaRatio').textContent = (data.max_area_ratio * 100).toFixed(2) + '%';
