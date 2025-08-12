@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>화재 탐지 시스템</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1><i class="fas fa-fire"></i> 화재 탐지 시스템</h1>
+            <p>AI 기반 실시간 화재 및 연기 탐지</p>
+        </header>
+
+        <main class="main-content">
+            <!-- 실시간 탐지 섹션 -->
+            <section class="realtime-section">
+                <h2><i class="fas fa-video"></i> 실시간 화재 탐지</h2>
+                
+                <div class="realtime-controls">
+                    <button class="btn btn-primary" id="startRealtimeBtn" onclick="startRealtime()">
+                        <i class="fas fa-play"></i> 실시간 탐지 시작
+                    </button>
+                    <button class="btn btn-danger" id="stopRealtimeBtn" onclick="stopRealtime()" style="display: none;">
+                        <i class="fas fa-stop"></i> 실시간 탐지 정지
+                    </button>
+                    <button class="btn btn-secondary" id="captureBtn" onclick="captureFrame()" style="display: none;">
+                        <i class="fas fa-camera"></i> 프레임 캡처
+                    </button>
+                </div>
+
+                <div class="video-container" id="videoContainer" style="display: none;">
+                    <img id="videoStream" src="" alt="실시간 비디오 스트림" />
+                    <div class="video-overlay">
+                        <div class="realtime-info" id="realtimeInfo">
+                            <div class="info-item">
+                                <span class="info-label">현재 등급:</span>
+                                <span class="info-value" id="currentGrade">대기중</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">화재:</span>
+                                <span class="info-value" id="fireCount">0</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">연기:</span>
+                                <span class="info-value" id="smokeCount">0</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">프레임:</span>
+                                <span class="info-value" id="frameCount">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 업로드 섹션 -->
+            <section class="upload-section">
+                <h2><i class="fas fa-upload"></i> 영상 업로드</h2>
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-content">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <p>클릭하거나 파일을 여기에 드래그하세요</p>
+                        <p class="file-info">지원 형식: MP4, AVI, MOV, WMV, FLV, WEBM (최대 16MB)</p>
+                    </div>
+                    <input type="file" id="fileInput" accept="video/*" style="display: none;">
+                </div>
+                
+                <div class="upload-progress" id="uploadProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p id="progressText">업로드 중...</p>
+                </div>
+            </section>
+
+            <!-- 실시간 통계 섹션 -->
+            <section class="stats-section">
+                <h2><i class="fas fa-chart-line"></i> 실시간 통계</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>평균 면적 비율</h3>
+                        <div class="stat-value" id="avgAreaRatio">0%</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>최대 면적 비율</h3>
+                        <div class="stat-value" id="maxAreaRatio">0%</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>추세</h3>
+                        <div class="stat-value" id="trend">안정</div>
+                    </div>
+                    <div class="stat-card">
+                        <h3>데이터 포인트</h3>
+                        <div class="stat-value" id="dataPoints">0</div>
+                    </div>
+                </div>
+                <button class="btn btn-secondary" onclick="resetStats()">
+                    <i class="fas fa-refresh"></i> 통계 리셋
+                </button>
+            </section>
+
+            <!-- 분석 결과 섹션 -->
+            <section class="results-section" id="resultsSection" style="display: none;">
+                <h2><i class="fas fa-analytics"></i> 분석 결과</h2>
+                
+                <div class="result-summary" id="resultSummary">
+                    <!-- 분석 요약 정보가 여기에 표시됩니다 -->
+                </div>
+
+                <div class="result-details">
+                    <h3>연기 등급 분류</h3>
+                    <div class="smoke-grades">
+                        <div class="grade-item grade-light">
+                            <span class="grade-color"></span>
+                            <span>경미 (Light)</span>
+                        </div>
+                        <div class="grade-item grade-moderate">
+                            <span class="grade-color"></span>
+                            <span>보통 (Moderate)</span>
+                        </div>
+                        <div class="grade-item grade-heavy">
+                            <span class="grade-color"></span>
+                            <span>심각 (Heavy)</span>
+                        </div>
+                        <div class="grade-item grade-critical">
+                            <span class="grade-color"></span>
+                            <span>위험 (Critical)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <canvas id="analysisChart"></canvas>
+                </div>
+
+                <div class="frame-results" id="frameResults">
+                    <!-- 프레임별 상세 결과가 여기에 표시됩니다 -->
+                </div>
+            </section>
+        </main>
+
+        <!-- 알림 메시지 -->
+        <div class="notification" id="notification"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
