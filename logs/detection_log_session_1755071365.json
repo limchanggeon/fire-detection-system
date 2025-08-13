@@ -1,0 +1,23 @@
+{
+  "session_id": "session_1755071365",
+  "start_time": "2025-08-13T16:49:25.682544",
+  "end_time": "2025-08-13T16:49:35.693017",
+  "duration_seconds": 10,
+  "final_grade": "small",
+  "grade_value": 0,
+  "statistics": {
+    "avg_area_ratio": 0.01209254761536916,
+    "max_area_ratio": 0.7255528569221497,
+    "total_frames": 60,
+    "total_detections": 1,
+    "smoke_color_distribution": {
+      "black": 0,
+      "white": 0,
+      "unknown": 1
+    }
+  },
+  "frame_data": [
+    {
+      "timestamp": 1755071365.6826339,
+      "datetime": "2025-08-13T16:49:25.682634",
+      "area_ratio": 

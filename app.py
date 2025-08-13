@@ -598,7 +598,7 @@ def process_realtime_frame(frame):
                     # 연기 색상 분석 (클래스 0이 연기인 경우)
                     smoke_color = 'unknown'
                     color_confidence = 0.0
-                    if class_id == 0:  # 연기 클래스 (현재는 'fire'로 라벨링되었지만 실제로는 연기)
+                    if class_id == 0:  # 연기 클래스 (smoke)
                         smoke_color, color_confidence = analyze_smoke_color(frame, [x1, y1, x2, y2])
                     
                     # 바운딩 박스 그리기
