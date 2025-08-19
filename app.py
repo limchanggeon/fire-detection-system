@@ -21,7 +21,10 @@ ALLOWED_EXTENSIONS = {'mp4', 'avi', 'mov', 'wmv', 'flv', 'webm'}
 
 # 전역 변수들
 model = None
-area_accumulator = deque(maxlen=10)  # 10초간의 면적 데이터 저장 (1초당 1프레임 가정)
+# 비디오 업로드용 면적 누적기 (영상별로 독립적으로 사용)
+video_area_accumulator = deque(maxlen=100)  # 더 많은 데이터 보관 가능
+# 실시간 탐지용 면적 누적기 (실시간 통계용)
+realtime_area_accumulator = deque(maxlen=30)  # 30초간의 데이터 저장
 smoke_grades = {
     'small': 0,     # 소형
     'medium': 1,    # 중형  
@@ -54,7 +57,9 @@ realtime_stats = {
     'smoke_count': 0,
     'black_smoke_count': 0,
     'white_smoke_count': 0,
-    'unknown_smoke_count': 0
+    'unknown_smoke_count': 0,
+    'status_message': '대기 중',  # "감지됨 (백연, 소형)" 형식의 상태 문구
+    'dominant_smoke_color': 'unknown'  # 주요 연기 색상
 }
 
 # 10초 타이머 기반 등급 분류 시스템
@@ -99,8 +104,10 @@ def load_model():
         print(f"모델 로드 실패: {e}")
         return False
 
-def calculate_area_accumulation(detections, frame_width, frame_height):
-    """10초간 면적 누적 계산"""
+def calculate_area_accumulation_realtime(detections, frame_width, frame_height):
+    """실시간 탐지용 면적 누적 계산 (타임스탬프 기반)"""
+    global realtime_area_accumulator
+    
     total_area = 0
     
     for detection in detections:
@@ -115,9 +122,47 @@ def calculate_area_accumulation(detections, frame_width, frame_height):
     frame_area = frame_width * frame_height
     area_ratio = total_area / frame_area if frame_area > 0 else 0
     
-    # 면적 누적기에 추가
-    area_accumulator.append({
-        'timestamp': time.time(),
+    current_time = time.time()
+    
+    # 실시간 면적 누적기에 추가 (30초간 유지)
+    realtime_area_accumulator.append({
+        'timestamp': current_time,
+        'area_ratio': area_ratio,
+        'total_area': total_area
+    })
+    
+    # 30초 이전 데이터 제거 (시간 기반)
+    cutoff_time = current_time - 30  # 30초 전
+    while realtime_area_accumulator and realtime_area_accumulator[0]['timestamp'] < cutoff_time:
+        realtime_area_accumulator.popleft()
+    
+    return area_ratio
+
+def calculate_area_accumulation_video(detections, frame_width, frame_height, video_timestamp):
+    """비디오 업로드용 면적 누적 계산 (영상 타임스탬프 기반)"""
+    global video_area_accumulator
+    
+    total_area = 0
+    
+    for detection in detections:
+        # 바운딩 박스 좌표 추출
+        x1, y1, x2, y2 = detection[:4]
+        
+        # 면적 계산 (픽셀 단위)
+        area = (x2 - x1) * (y2 - y1)
+        total_area += area
+    
+    # 전체 프레임 대비 비율로 변환
+    frame_area = frame_width * frame_height
+    area_ratio = total_area / frame_area if frame_area > 0 else 0
+    
+    # 디버깅 정보 출력
+    if len(detections) > 0:
+        print(f"프레임 {video_timestamp:.1f}s: {len(detections)}개 탐지, 총 면적: {total_area:.0f}px, 비율: {area_ratio:.4f} ({area_ratio*100:.2f}%)")
+    
+    # 비디오 면적 누적기에 추가 (영상 타임스탬프 사용)
+    video_area_accumulator.append({
+        'video_timestamp': video_timestamp,
         'area_ratio': area_ratio,
         'total_area': total_area
     })
@@ -127,15 +172,21 @@ def calculate_area_accumulation(detections, frame_width, frame_height):
 def classify_smoke_grade(area_ratio, confidence_scores):
     """연기 등급 분류 로직"""
     # 새로운 연기 등급 분류 기준:
-    # - 소형: 평균 면적 비율 < 30%
-    # - 중형: 30% ≤ 평균 면적 비율 < 70%  
-    # - 대형: 평균 면적 비율 ≥ 70%
+    # - 소형: 평균 면적 비율 < 5%
+    # - 중형: 5% ≤ 평균 면적 비율 < 15%  
+    # - 대형: 평균 면적 비율 ≥ 15%
     
-    if area_ratio < 0.30:  # 30% 미만
+    # 디버깅 정보 출력
+    print(f"등급 분류 - area_ratio: {area_ratio:.4f} ({area_ratio*100:.2f}%)")
+    
+    if area_ratio < 0.05:  # 5% 미만
+        print("등급: 소형 (small)")
         return 'small', smoke_grades['small']
-    elif area_ratio < 0.70:  # 30% 이상 70% 미만
+    elif area_ratio < 0.15:  # 5% 이상 15% 미만
+        print("등급: 중형 (medium)")
         return 'medium', smoke_grades['medium']
-    else:  # 70% 이상
+    else:  # 15% 이상
+        print("등급: 대형 (large)")
         return 'large', smoke_grades['large']
 
 def analyze_smoke_color(frame, bbox):
@@ -219,9 +270,48 @@ def get_smoke_color_display_name(smoke_type):
     }
     return display_names.get(smoke_type, 'Unknown')
 
+def get_korean_smoke_color_name(smoke_type):
+    """연기 색상 한글명 반환"""
+    korean_names = {
+        'black': '흑연',
+        'white': '백연', 
+        'unknown': '미상'
+    }
+    return korean_names.get(smoke_type, '미상')
+
+def get_korean_grade_name(grade):
+    """등급 한글명 반환"""
+    korean_grades = {
+        'small': '소형',
+        'medium': '중형',
+        'large': '대형'
+    }
+    return korean_grades.get(grade, '소형')
+
+def generate_status_message(fire_count, smoke_count, dominant_smoke_color, current_grade):
+    """상태 메시지 생성 - "감지됨 (백연, 소형)" 형식"""
+    if fire_count > 0 and smoke_count > 0:
+        # 화재와 연기 모두 감지
+        smoke_color_kr = get_korean_smoke_color_name(dominant_smoke_color)
+        grade_kr = get_korean_grade_name(current_grade)
+        return f"화재·연기 감지 ({smoke_color_kr}, {grade_kr})"
+    elif fire_count > 0:
+        # 화재만 감지
+        grade_kr = get_korean_grade_name(current_grade)
+        return f"화재 감지 ({grade_kr})"
+    elif smoke_count > 0:
+        # 연기만 감지
+        smoke_color_kr = get_korean_smoke_color_name(dominant_smoke_color)
+        grade_kr = get_korean_grade_name(current_grade)
+        return f"연기 감지 ({smoke_color_kr}, {grade_kr})"
+    else:
+        return "정상 상태"
+
 def get_area_accumulation_stats():
-    """10초간 면적 누적 통계 계산"""
-    if not area_accumulator:
+    """실시간 탐지용 면적 누적 통계 계산 (30초간 데이터 기반)"""
+    global realtime_area_accumulator
+    
+    if not realtime_area_accumulator:
         return {
             'avg_area_ratio': 0,
             'max_area_ratio': 0,
@@ -229,13 +319,13 @@ def get_area_accumulation_stats():
             'data_points': 0
         }
     
-    areas = [data['area_ratio'] for data in area_accumulator]
+    areas = [data['area_ratio'] for data in realtime_area_accumulator]
     
     # 통계 계산
     avg_area = np.mean(areas)
     max_area = np.max(areas)
     
-    # 추세 분석 (최근 3개 데이터와 이전 3개 데이터 비교)
+    # 추세 분석 (최근 데이터와 이전 데이터 비교)
     if len(areas) >= 6:
         recent_avg = np.mean(areas[-3:])
         prev_avg = np.mean(areas[-6:-3])
@@ -254,7 +344,26 @@ def get_area_accumulation_stats():
         'max_area_ratio': float(max_area),
         'trend': trend,
         'data_points': len(areas),
-        'time_span': len(areas)  # 초 단위
+        'time_span': len(areas)  # 실제 시간 기반으로 계산됨
+    }
+
+def get_video_area_stats():
+    """비디오 업로드용 면적 통계 계산"""
+    global video_area_accumulator
+    
+    if not video_area_accumulator:
+        return {
+            'avg_area_ratio': 0,
+            'max_area_ratio': 0,
+            'total_frames': 0
+        }
+    
+    areas = [data['area_ratio'] for data in video_area_accumulator]
+    
+    return {
+        'avg_area_ratio': float(np.mean(areas)),
+        'max_area_ratio': float(np.max(areas)),
+        'total_frames': len(areas)
     }
 
 def start_smoke_detection_timer():
@@ -338,21 +447,17 @@ def calculate_final_grade():
         print("분석할 데이터가 없습니다.")
         return
     
+    if session_start_time is None:
+        print("세션 시작 시간이 없습니다.")
+        return
+    
     # 평균 면적 비율 계산
     area_ratios = [frame['area_ratio'] for frame in frame_area_buffer]
     avg_area_ratio = np.mean(area_ratios)
     max_area_ratio = np.max(area_ratios)
     
-    # 등급 분류
-    if avg_area_ratio < 0.30:  # 30% 미만
-        grade = 'small'
-        grade_value = 0
-    elif avg_area_ratio < 0.70:  # 30% 이상 70% 미만
-        grade = 'medium'
-        grade_value = 1
-    else:  # 70% 이상
-        grade = 'large'
-        grade_value = 2
+    # 등급 분류 (일관된 기준 사용)
+    grade, grade_value = classify_smoke_grade(avg_area_ratio, [])
     
     # 연기 색상 통계 계산
     smoke_color_stats = {'black': 0, 'white': 0, 'unknown': 0}
@@ -448,89 +553,156 @@ def save_summary_log(result):
 
 def process_video(video_path):
     """비디오 처리 및 화재 탐지"""
+    global video_area_accumulator
+    
     if model is None:
         return None, "모델이 로드되지 않았습니다."
     
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        return None, "비디오 파일을 열 수 없습니다."
-    
-    results = []
-    frame_count = 0
-    
-    # 비디오 정보
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    
-    # 1초마다 프레임 처리 (FPS만큼 프레임 건너뛰기)
-    frame_interval = max(1, fps)
-    
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
+    try:
+        # 비디오별로 면적 누적기 초기화
+        video_area_accumulator.clear()
+        print(f"비디오 처리 시작: {video_path}")
         
-        # 지정된 간격으로만 프레임 처리
-        if frame_count % frame_interval == 0:
-            # YOLO 추론
-            detection_results = model(frame)
-            
-            detections = []
-            confidence_scores = []
-            
-            for result in detection_results:
-                boxes = result.boxes
-                if boxes is not None:
-                    for box in boxes:
-                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                        confidence = box.conf[0].cpu().numpy()
-                        class_id = box.cls[0].cpu().numpy()
-                        
-                        detections.append([x1, y1, x2, y2, confidence, class_id])
-                        confidence_scores.append(confidence)
-            
-            # 면적 누적 계산
-            area_ratio = calculate_area_accumulation(detections, width, height)
-            
-            # 연기 등급 분류
-            grade_name, grade_value = classify_smoke_grade(area_ratio, confidence_scores)
-            
-            # 결과 저장
-            frame_result = {
-                'frame_number': frame_count,
-                'timestamp': frame_count / fps,
-                'detections': len(detections),
-                'area_ratio': area_ratio,
-                'smoke_grade': grade_name,
-                'grade_value': grade_value,
-                'avg_confidence': float(np.mean(confidence_scores)) if confidence_scores else 0,
-                'detection_details': detections
-            }
-            
-            results.append(frame_result)
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return None, "비디오 파일을 열 수 없습니다."
         
-        frame_count += 1
+        results = []
+        frame_count = 0
+        
+        # 비디오 정보
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        print(f"비디오 정보 - FPS: {fps}, 총 프레임: {total_frames}, 해상도: {width}x{height}")
+        
+        # 1초마다 프레임 처리 (FPS만큼 프레임 건너뛰기)
+        frame_interval = max(1, fps)
+        
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+            
+            # 지정된 간격으로만 프레임 처리
+            if frame_count % frame_interval == 0:
+                try:
+                    # YOLO 추론
+                    detection_results = model(frame)
+                    
+                    detections = []
+                    confidence_scores = []
+                    
+                    for result in detection_results:
+                        boxes = result.boxes
+                        if boxes is not None:
+                            for box in boxes:
+                                x1, y1, x2, y2 = map(float, box.xyxy[0].cpu().numpy())
+                                confidence = float(box.conf[0].cpu().numpy())
+                                class_id = int(box.cls[0].cpu().numpy())  # int 변환 추가
+                                
+                                detections.append([x1, y1, x2, y2, confidence, class_id])
+                                confidence_scores.append(confidence)
+                    
+                    # 면적 누적 계산 (비디오 타임스탬프 사용)
+                    video_timestamp = frame_count / fps
+                    area_ratio = calculate_area_accumulation_video(detections, width, height, video_timestamp)
+                    
+                    # 연기 등급 분류
+                    grade_name, grade_value = classify_smoke_grade(area_ratio, confidence_scores)
+                    
+                    # 클래스별 카운트 계산 (클래스 0=smoke, 클래스 1=fire)
+                    smoke_count = sum(1 for det in detections if int(det[5]) == 0)
+                    fire_count = sum(1 for det in detections if int(det[5]) == 1)
+                    
+                    # 연기 색상 분석 (비디오용, 중복 호출 방지)
+                    smoke_colors = {}
+                    smoke_color_cache = {}  # 비디오 프레임 내 캐시
+                    for det in detections:
+                        if int(det[5]) == 0:  # 연기 클래스만
+                            bbox = [det[0], det[1], det[2], det[3]]
+                            detection_key = f"{int(det[0])}_{int(det[1])}_{int(det[2])}_{int(det[3])}"
+                            
+                            # 캐시 확인하여 중복 분석 방지
+                            if detection_key not in smoke_color_cache:
+                                smoke_color, _ = analyze_smoke_color(frame, bbox)
+                                smoke_color_cache[detection_key] = smoke_color
+                            else:
+                                smoke_color = smoke_color_cache[detection_key]
+                            
+                            smoke_colors[detection_key] = smoke_color
+                    
+                    # 연기 색상별 카운트
+                    black_smoke_count = sum(1 for color in smoke_colors.values() if color == 'black')
+                    white_smoke_count = sum(1 for color in smoke_colors.values() if color == 'white')
+                    unknown_smoke_count = sum(1 for color in smoke_colors.values() if color == 'unknown')
+                    
+                    # 결과 저장
+                    frame_result = {
+                        'frame_number': frame_count,
+                        'timestamp': frame_count / fps,
+                        'detections': len(detections),
+                        'fire_count': fire_count,
+                        'smoke_count': smoke_count,
+                        'black_smoke_count': black_smoke_count,
+                        'white_smoke_count': white_smoke_count,
+                        'unknown_smoke_count': unknown_smoke_count,
+                        'area_ratio': area_ratio,
+                        'smoke_grade': grade_name,
+                        'grade_value': grade_value,
+                        'avg_confidence': float(np.mean(confidence_scores)) if confidence_scores else 0,
+                        'detection_details': detections
+                    }
+                    
+                    results.append(frame_result)
+                    
+                except Exception as e:
+                    print(f"프레임 {frame_count} 처리 중 오류: {e}")
+                    continue
+            
+            frame_count += 1
     
-    cap.release()
-    
-    # 전체 분석 결과
-    analysis_summary = {
-        'total_frames': total_frames,
-        'processed_frames': len(results),
-        'video_duration': total_frames / fps,
-        'fps': fps,
-        'resolution': {'width': width, 'height': height},
-        'area_stats': get_area_accumulation_stats(),
-        'max_grade': max([r['grade_value'] for r in results]) if results else 0,
-        'avg_detections': float(np.mean([r['detections'] for r in results])) if results else 0
-    }
-    
-    return {
-        'frame_results': results,
-        'summary': analysis_summary
-    }, None
+        cap.release()
+        
+        print(f"비디오 처리 완료 - 총 {len(results)}개 프레임 처리됨")
+        
+        # 전체 비디오 평균 면적 기준으로 최종 등급 계산
+        video_stats = get_video_area_stats()
+        overall_avg_area = video_stats.get('avg_area_ratio', 0)
+        final_grade_name, final_grade_value = classify_smoke_grade(overall_avg_area, [])
+        
+        print(f"비디오 분석 완료 - 전체 평균 면적: {overall_avg_area:.4f} ({overall_avg_area*100:.2f}%), 최종 등급: {final_grade_name}")
+        
+        # 전체 분석 결과
+        analysis_summary = {
+            'total_frames': total_frames,
+            'processed_frames': len(results),
+            'video_duration': total_frames / fps,
+            'fps': fps,
+            'resolution': {'width': width, 'height': height},
+            'area_stats': video_stats,  # 비디오 전용 통계 사용
+            'final_grade': final_grade_name,  # 최종 등급 추가
+            'final_grade_value': final_grade_value,  # 최종 등급 값 추가
+            'max_grade': max([r['grade_value'] for r in results]) if results else 0,
+            'avg_detections': float(np.mean([r['detections'] for r in results])) if results else 0,
+            'total_fire_count': sum([r['fire_count'] for r in results]),
+            'total_smoke_count': sum([r['smoke_count'] for r in results]),
+            'total_black_smoke_count': sum([r['black_smoke_count'] for r in results]),
+            'total_white_smoke_count': sum([r['white_smoke_count'] for r in results]),
+            'total_unknown_smoke_count': sum([r['unknown_smoke_count'] for r in results])
+        }
+        
+        return {
+            'frame_results': results,
+            'summary': analysis_summary
+        }, None
+        
+    except Exception as e:
+        error_msg = f"비디오 처리 중 오류 발생: {str(e)}"
+        print(error_msg)
+        return None, error_msg
 
 def start_camera():
     """웹캠 시작"""
@@ -579,13 +751,15 @@ def process_realtime_frame(frame):
         detections = []
         confidence_scores = []
         
-        # 결과 처리
+        # 결과 처리 및 연기 색상 분석 (한 번만 수행)
+        smoke_colors_cache = {}  # 연기 색상 캐시
+        
         for result in results:
             boxes = result.boxes
             if boxes is not None:
-                for box in boxes:
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    confidence = box.conf[0].cpu().numpy()
+                for i, box in enumerate(boxes):
+                    x1, y1, x2, y2 = map(float, box.xyxy[0].cpu().numpy())
+                    confidence = float(box.conf[0].cpu().numpy())
                     class_id = int(box.cls[0].cpu().numpy())
                     
                     detections.append([x1, y1, x2, y2, confidence, class_id])
@@ -595,11 +769,16 @@ def process_realtime_frame(frame):
                     label_name = class_labels.get(class_id, f"Class_{class_id}")
                     color = class_colors.get(class_id, (0, 255, 0))  # 기본 녹색
                     
-                    # 연기 색상 분석 (클래스 0이 연기인 경우)
+                    # 연기 색상 분석 (클래스 0이 연기인 경우, 한 번만 수행)
                     smoke_color = 'unknown'
                     color_confidence = 0.0
                     if class_id == 0:  # 연기 클래스 (smoke)
-                        smoke_color, color_confidence = analyze_smoke_color(frame, [x1, y1, x2, y2])
+                        detection_key = f"{int(x1)}_{int(y1)}_{int(x2)}_{int(y2)}"
+                        if detection_key not in smoke_colors_cache:
+                            smoke_color, color_confidence = analyze_smoke_color(frame, [x1, y1, x2, y2])
+                            smoke_colors_cache[detection_key] = (smoke_color, color_confidence)
+                        else:
+                            smoke_color, color_confidence = smoke_colors_cache[detection_key]
                     
                     # 바운딩 박스 그리기
                     cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
@@ -621,16 +800,16 @@ def process_realtime_frame(frame):
                     cv2.putText(frame, label, (int(x1), int(y1) - 5), 
                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         
-        # 면적 계산 및 등급 분류
+        # 면적 계산 및 등급 분류 (실시간 탐지용)
         height, width = frame.shape[:2]
-        area_ratio = calculate_area_accumulation(detections, width, height)
+        area_ratio = calculate_area_accumulation_realtime(detections, width, height)
         grade_name, grade_value = classify_smoke_grade(area_ratio, confidence_scores)
         
-        # 클래스별 카운트 계산
-        fire_count = sum(1 for det in detections if int(det[5]) == 0)
-        smoke_count = sum(1 for det in detections if int(det[5]) == 1)
+        # 클래스별 카운트 계산 (클래스 0=smoke, 클래스 1=fire)
+        smoke_count = sum(1 for det in detections if int(det[5]) == 0)
+        fire_count = sum(1 for det in detections if int(det[5]) == 1)
         
-        # 연기 색상별 카운트 계산 및 연기 색상 데이터 수집 (클래스 0이 연기)
+        # 연기 색상별 카운트 계산 (캐시 사용으로 중복 호출 방지)
         black_smoke_count = 0
         white_smoke_count = 0
         unknown_smoke_count = 0
@@ -641,8 +820,17 @@ def process_realtime_frame(frame):
             class_id = int(detection[5])
             if class_id == 0:  # 연기 클래스
                 smoke_detection_found = True
-                bbox = [int(detection[0]), int(detection[1]), int(detection[2]), int(detection[3])]
-                smoke_color, _ = analyze_smoke_color(frame, bbox)
+                x1, y1, x2, y2 = detection[:4]
+                detection_key = f"{int(x1)}_{int(y1)}_{int(x2)}_{int(y2)}"
+                
+                # 이미 계산된 색상 정보 사용 (중복 계산 방지)
+                if detection_key in smoke_colors_cache:
+                    smoke_color, _ = smoke_colors_cache[detection_key]
+                else:
+                    # 캐시에 없으면 새로 계산 (예외 상황)
+                    bbox = [int(x1), int(y1), int(x2), int(y2)]
+                    smoke_color, _ = analyze_smoke_color(frame, bbox)
+                
                 smoke_colors[i] = smoke_color
                 
                 if smoke_color == 'black':
@@ -672,8 +860,24 @@ def process_realtime_frame(frame):
         realtime_stats['white_smoke_count'] = white_smoke_count
         realtime_stats['unknown_smoke_count'] = unknown_smoke_count
         
-        # 현재 상태 정보 표시
-        status_text = f"Grade: {grade_name.upper()} | Fire: {fire_count} | Smoke: {smoke_count} (흑연: {black_smoke_count}, 백연: {white_smoke_count}) | Area: {area_ratio*100:.1f}%"
+        # 주요 연기 색상 결정
+        dominant_smoke_color = 'unknown'
+        if black_smoke_count > white_smoke_count and black_smoke_count > unknown_smoke_count:
+            dominant_smoke_color = 'black'
+        elif white_smoke_count > black_smoke_count and white_smoke_count > unknown_smoke_count:
+            dominant_smoke_color = 'white'
+        elif smoke_count > 0:
+            dominant_smoke_color = 'unknown'
+        
+        realtime_stats['dominant_smoke_color'] = dominant_smoke_color
+        
+        # 상태 메시지 생성 - "감지됨 (백연, 소형)" 형식
+        realtime_stats['status_message'] = generate_status_message(
+            fire_count, smoke_count, dominant_smoke_color, grade_name
+        )
+        
+        # 프레임에 상태 텍스트 표시
+        status_text = f"{realtime_stats['status_message']} | Area: {area_ratio*100:.1f}%"
         
         # 상태 텍스트 배경 그리기
         text_size = cv2.getTextSize(status_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)[0]
@@ -761,8 +965,25 @@ def get_stats():
 @app.route('/reset')
 def reset_stats():
     """통계 리셋"""
-    global area_accumulator
-    area_accumulator.clear()
+    global realtime_area_accumulator, video_area_accumulator, realtime_stats
+    realtime_area_accumulator.clear()
+    video_area_accumulator.clear()
+    
+    # 실시간 통계도 초기화
+    realtime_stats.update({
+        'frame_count': 0,
+        'detection_count': 0,
+        'current_grade': 'small',
+        'last_update': time.time(),
+        'fire_count': 0,
+        'smoke_count': 0,
+        'black_smoke_count': 0,
+        'white_smoke_count': 0,
+        'unknown_smoke_count': 0,
+        'status_message': '대기 중',
+        'dominant_smoke_color': 'unknown'
+    })
+    
     return jsonify({'success': True, 'message': '통계가 리셋되었습니다.'})
 
 @app.route('/start_realtime')
@@ -805,9 +1026,9 @@ def capture_frame():
         return jsonify({'error': '캡처할 프레임이 없습니다.'}), 400
     
     try:
-        # 클래스별 카운트 계산
-        fire_count = sum(1 for det in current_detections if int(det[5]) == 0)
-        smoke_count = sum(1 for det in current_detections if int(det[5]) == 1)
+        # 클래스별 카운트 계산 (클래스 0=smoke, 클래스 1=fire)
+        smoke_count = sum(1 for det in current_detections if int(det[5]) == 0)
+        fire_count = sum(1 for det in current_detections if int(det[5]) == 1)
         
         # 프레임을 base64로 인코딩
         ret, buffer = cv2.imencode('.jpg', current_frame)

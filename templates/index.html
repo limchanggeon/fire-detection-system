@@ -35,6 +35,11 @@
                     <img id="videoStream" src="" alt="실시간 비디오 스트림" />
                     <div class="video-overlay">
                         <div class="realtime-info" id="realtimeInfo">
+                            <!-- 상태 메시지 (감지됨 (백연, 소형) 형식) -->
+                            <div class="info-item status-message">
+                                <span class="info-label">현재 상태:</span>
+                                <span class="info-value status-text" id="statusMessage">대기 중</span>
+                            </div>
                             <div class="info-item">
                                 <span class="info-label">현재 등급:</span>
                                 <span class="info-value" id="currentGrade">대기중</span>
@@ -137,21 +142,17 @@
                 <div class="result-details">
                     <h3>연기 등급 분류</h3>
                     <div class="smoke-grades">
-                        <div class="grade-item grade-light">
+                        <div class="grade-item grade-small">
                             <span class="grade-color"></span>
-                            <span>경미 (Light)</span>
+                            <span>소형 (Small)</span>
                         </div>
-                        <div class="grade-item grade-moderate">
+                        <div class="grade-item grade-medium">
                             <span class="grade-color"></span>
-                            <span>보통 (Moderate)</span>
+                            <span>중형 (Medium)</span>
                         </div>
-                        <div class="grade-item grade-heavy">
+                        <div class="grade-item grade-large">
                             <span class="grade-color"></span>
-                            <span>심각 (Heavy)</span>
-                        </div>
-                        <div class="grade-item grade-critical">
-                            <span class="grade-color"></span>
-                            <span>위험 (Critical)</span>
+                            <span>대형 (Large)</span>
                         </div>
                     </div>
                 </div>

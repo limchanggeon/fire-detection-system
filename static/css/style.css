@@ -278,6 +278,38 @@ section h2 {
     font-weight: bold;
 }
 
+/* 상태 메시지 스타일 */
+.status-message {
+    border-bottom: 1px solid rgba(255,255,255,0.2);
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+}
+
+.status-text {
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: all 0.3s ease;
+    font-weight: bold;
+}
+
+.status-text.status-fire {
+    background: #fed7d7;
+    color: #c53030;
+    border: 1px solid #fc8181;
+}
+
+.status-text.status-smoke {
+    background: #feebc8;
+    color: #c05621;
+    border: 1px solid #f6ad55;
+}
+
+.status-text.status-normal {
+    background: #c6f6d5;
+    color: #2d7748;
+    border: 1px solid #68d391;
+}
+
 #currentGrade {
     padding: 4px 8px;
     border-radius: 4px;

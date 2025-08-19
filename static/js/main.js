@@ -443,6 +443,22 @@ function updateRealtimeStats() {
     fetch('/realtime_stats')
         .then(response => response.json())
         .then(data => {
+            // 상태 메시지 업데이트 (새로운 기능)
+            const statusElement = document.getElementById('statusMessage');
+            if (data.status_message && statusElement) {
+                statusElement.textContent = data.status_message;
+                
+                // 상태에 따른 스타일 클래스 적용
+                statusElement.className = 'info-value status-text';
+                if (data.status_message.includes('화재')) {
+                    statusElement.classList.add('status-fire');
+                } else if (data.status_message.includes('연기')) {
+                    statusElement.classList.add('status-smoke');
+                } else if (data.status_message.includes('정상')) {
+                    statusElement.classList.add('status-normal');
+                }
+            }
+            
             // 실시간 정보 업데이트
             const gradeElement = document.getElementById('currentGrade');
             gradeElement.textContent = getGradeDisplayName(data.current_grade);
